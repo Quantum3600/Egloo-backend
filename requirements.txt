@@ -6,10 +6,12 @@ asyncpg
 python-dotenv
 pydantic[email]
 pydantic-settings
+email-validator
 passlib[bcrypt]
+bcrypt==4.0.1
 python-jose[cryptography]
 cryptography
-redis
+redis[asyncio]
 celery[redis]
 langchain
 langchain-community

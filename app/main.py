@@ -1,24 +1,27 @@
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.routers import auth
+from app.services.auth_service import check_redis_connection
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🐧 Egloo API starting... PenGo is waking up!")
+    print("[STARTUP] Egloo API starting... PenGo is waking up!")
+    await check_redis_connection()
+    print("[OK] Redis connected")
     yield
-    print("🐧 Egloo API shutting down... PenGo is sleeping!")
+    print("[SHUTDOWN] Egloo API shutting down... PenGo is sleeping!")
 
 
 app = FastAPI(
     title="Egloo API",
     version="1.0.0",
-    description="PenGo — Your second brain assistant",
+    description="PenGo — Your second brain assistant 🐧",
     lifespan=lifespan,
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,8 +30,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api/v1")
 
-# ── Root ──────────────────────────────────────────────────────────────────────
+
 @app.get("/")
 async def root():
     return {
@@ -39,10 +43,8 @@ async def root():
     }
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    # Placeholder — real DB/Redis checks will be added later.
     return {
         "status": "healthy",
         "database": "connected",
