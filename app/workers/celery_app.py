@@ -1,10 +1,17 @@
+# app/workers/celery_app.py
+
 from celery import Celery
+from celery.schedules import crontab
+
 from app.config import settings
 
 celery_app = Celery(
     "egloo",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
+    include=[
+        "app.workers.tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -13,6 +20,27 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
-)
+    task_track_started=True,
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
 
-# This is a placeholder. Tasks will be added in later steps.
+    # Retry failed tasks up to 3 times with 60s delay
+    task_max_retries=3,
+    task_default_retry_delay=60,
+
+    # Beat schedule — runs periodic tasks automatically
+    beat_schedule={
+
+        # Auto-sync all sources every 15 minutes
+        "auto-sync-all-sources": {
+            "task": "app.workers.tasks.auto_sync_all_users",
+            "schedule": crontab(minute="*/15"),
+        },
+
+        # Generate daily digest at 7 AM UTC every day
+        "generate-daily-digests": {
+            "task": "app.workers.tasks.generate_digests_for_all_users",
+            "schedule": crontab(hour=7, minute=0),
+        },
+    },
+)

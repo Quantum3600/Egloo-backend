@@ -1,6 +1,5 @@
-version: "3.9"
-
 services:
+
   postgres:
     image: postgres:15
     environment:
@@ -11,11 +10,21 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U egloo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   chroma:
     image: chromadb/chroma
@@ -31,33 +40,50 @@ services:
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
-      - chroma
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
     volumes:
       - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:
     build: .
-    command: celery -A app.workers.celery_app:celery_app worker --loglevel=info
+    command: >
+      celery -A app.workers.celery_app:celery_app worker
+      --loglevel=info
+      --concurrency=2
+      --queues=celery
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - .:/app
 
   beat:
     build: .
-    command: celery -A app.workers.celery_app:celery_app beat --loglevel=info
+    command: >
+      celery -A app.workers.celery_app:celery_app beat
+      --loglevel=info
+      --scheduler celery.beat:PersistentScheduler
+      -s /app/data/celerybeat-schedule
     env_file:
       - .env
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     volumes:
       - .:/app
+      - beat_data:/app/data
 
 volumes:
   postgres_data:
   chroma_data:
+  beat_data:
