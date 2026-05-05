@@ -38,3 +38,4 @@ groq
 openai
 sse-starlette
 tenacity
+firebase-admin

@@ -39,6 +39,9 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://egloo:egloo@postgres:5432/egloo
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,6 +62,9 @@ services:
       --queues=celery
     env_file:
       - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://egloo:egloo@postgres:5432/egloo
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +82,9 @@ services:
       -s /app/data/celerybeat-schedule
     env_file:
       - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://egloo:egloo@postgres:5432/egloo
     depends_on:
       redis:
         condition: service_healthy

@@ -173,21 +173,33 @@ def auto_sync_all_users():
     max_retries=2,
     default_retry_delay=120,
 )
-def generate_digest_for_user(self, user_id: str):
+def generate_digest_for_user(self, user_id: str, fcm_token: str = None):
     """
-    Celery task: generate the daily digest for one user.
-    Wired into DigestService in Step 9.
-    Placeholder implementation here — will be filled in Step 9.
+    Celery task: generate daily digest for one user.
+    Called by Celery Beat at 7 AM UTC every day.
+    Also callable manually via API.
     """
     async def _run():
-        print(f"[PenGo] Generating digest for user {user_id}...")
-        # Full implementation added in Step 9 (Digest module)
-        # from app.services.digest_service import generate_digest
-        # async with AsyncSessionLocal() as db:
-        #     await generate_digest(db, user_id)
+        from app.database import AsyncSessionLocal
+        from app.services.digest_service import generate_digest
+
+        print(f"[INFO] Celery: generating digest for user {user_id}")
+        async with AsyncSessionLocal() as db:
+            result = await generate_digest(
+                db=db,
+                user_id=user_id,
+                fcm_token=fcm_token,
+            )
+            print(
+                f"[OK] Celery digest complete: "
+                f"{len(result.get('topics', []))} topics, "
+                f"{len(result.get('action_items', []))} actions"
+            )
+            return result
 
     try:
-        run_async(_run())
+        import asyncio
+        return asyncio.run(_run())
     except Exception as exc:
         raise self.retry(exc=exc)
 

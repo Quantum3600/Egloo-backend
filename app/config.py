@@ -60,6 +60,19 @@ class Settings(BaseSettings):
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
 
+    # Digest settings
+    DIGEST_LOOKBACK_HOURS: int = 24
+    DIGEST_MAX_CHUNKS: int = 200
+    DIGEST_MIN_CHUNKS: int = 3
+
+    # FCM (Firebase Cloud Messaging) — optional
+    # Download your Firebase service account JSON from Firebase Console
+    # and put the path here. Leave empty to disable push notifications.
+    FCM_CREDENTIALS_PATH: Optional[str] = None
+
+    # App timezone for digest scheduling
+    APP_TIMEZONE: str = "UTC"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

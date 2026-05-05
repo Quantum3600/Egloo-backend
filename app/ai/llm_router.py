@@ -99,16 +99,16 @@ async def call_llm(
 
         # Skip if no API key
         if not _is_configured(provider):
-            print(f"⏭️  Skipping {name} — no API key")
+            print(f"[SKIP] Skipping {name} — no API key")
             continue
 
         # Skip if marked unhealthy in Redis
         if not await is_healthy(name):
-            print(f"⏭️  Skipping {name} — marked unhealthy")
+            print(f"[SKIP] Skipping {name} — marked unhealthy")
             errors.append(f"{name}: temporarily unhealthy")
             continue
 
-        print(f"🤖 Trying provider: {name}")
+        print(f"[INFO] Trying provider: {name}")
 
         try:
             # ── Try the provider ──────────────────────────────────────────
@@ -153,7 +153,7 @@ async def call_llm(
             # ── Success ───────────────────────────────────────────────────
             await mark_healthy(name)
             await log_usage(name, success=True, tokens_est=len(prompt) // 4)
-            print(f"✅ Provider {name} responded successfully")
+            print(f"[OK] Provider {name} responded successfully")
 
             # Rebuild full generator: buffer + remaining tokens
             async def _full_generator(
@@ -167,7 +167,7 @@ async def call_llm(
                     async for t in remaining:
                         yield t
                 except Exception as e:
-                    print(f"⚠️ Stream error from {provider_name}: {e}")
+                    print(f"[WARNING] Stream error from {provider_name}: {e}")
 
             return (
                 _full_generator(buffer, gen, name),
@@ -176,7 +176,7 @@ async def call_llm(
 
         except provider["rate_limit_error"] as e:
             # Rate limit — back off for health TTL seconds
-            print(f"🚫 {name} rate limited: {e}")
+            print(f"[WARNING] {name} rate limited: {e}")
             await mark_unhealthy(name, f"rate_limited: {str(e)[:80]}")
             await log_usage(name, success=False)
             errors.append(f"{name}: rate limited")
@@ -186,7 +186,7 @@ async def call_llm(
 
         except provider["base_error"] as e:
             # Provider error (timeout, config, API error)
-            print(f"❌ {name} error: {e}")
+            print(f"[ERROR] {name} error: {e}")
             await mark_unhealthy(name, f"error: {str(e)[:80]}")
             await log_usage(name, success=False)
             errors.append(f"{name}: {str(e)[:60]}")
@@ -194,7 +194,7 @@ async def call_llm(
 
         except Exception as e:
             # Unexpected error — log but don't mark unhealthy
-            print(f"⚠️ Unexpected error from {name}: {e}")
+            print(f"[WARNING] Unexpected error from {name}: {e}")
             errors.append(f"{name}: unexpected error")
             continue
 

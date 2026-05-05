@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, sources, ingest, query, llm
+from app.routers import auth, sources, ingest, query, llm, digest
 from app.services.auth_service import check_redis_connection
 
 
@@ -35,6 +35,7 @@ app.include_router(sources.router, prefix="/api/v1")
 app.include_router(ingest.router, prefix="/api/v1")
 app.include_router(query.router, prefix="/api/v1")
 app.include_router(llm.router, prefix="/api/v1")
+app.include_router(digest.router, prefix="/api/v1")
 
 
 @app.get("/")
