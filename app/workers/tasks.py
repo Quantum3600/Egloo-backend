@@ -276,3 +276,70 @@ def refresh_topics_for_user(
         return asyncio.run(_run())
     except Exception as exc:
         raise self.retry(exc=exc)
+
+
+# ─── Task 7: Process uploaded PDF ──────────────────────────────────────────
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.process_pdf_task",
+    max_retries=2,
+    default_retry_delay=60,
+)
+def process_pdf_task(self, user_id: str, doc_id: str, file_path: str, job_id: str):
+    """
+    Celery task: process an uploaded PDF file.
+    1. Extracts text
+    2. Chunks & embeds
+    3. Stores in ChromaDB and Postgres
+    """
+    async def _run():
+        from app.database import AsyncSessionLocal
+        from app.services.pdf_service import process_pdf_ingestion
+        from app.utils.job_tracker import update_job
+        import os
+
+        await update_job(
+            job_id,
+            status="started",
+            progress=10,
+            message="Pingo started analyzing your PDF...",
+        )
+
+        async with AsyncSessionLocal() as db:
+            try:
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(f"PDF file not found at {file_path}")
+
+                await update_job(
+                    job_id,
+                    progress=30,
+                    message="Extracting text from document...",
+                )
+
+                await process_pdf_ingestion(db, user_id, doc_id, file_path)
+
+                await update_job(
+                    job_id,
+                    status="success",
+                    progress=100,
+                    message="PDF ingestion complete! You can now ask questions about it.",
+                )
+
+                # Also refresh topics to include the new document
+                refresh_topics_for_user.delay(user_id=user_id)
+
+            except Exception as e:
+                await update_job(
+                    job_id,
+                    status="failed",
+                    progress=0,
+                    message="PDF processing failed",
+                    error=str(e),
+                )
+                raise
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        raise self.retry(exc=exc)

@@ -5,6 +5,7 @@ from app.models.digest import Digest
 from app.models.query_history import QueryHistory
 from app.models.saved_item import SavedItem
 from app.models.topic import Topic
+from app.models.uploaded_document import UploadedDocument
 
 __all__ = [
     "User",
@@ -14,4 +15,5 @@ __all__ = [
     "QueryHistory",
     "SavedItem",
     "Topic",
+    "UploadedDocument",
 ]

@@ -81,6 +81,7 @@ class EglooE2ETest:
             await self.test_list_sources_empty(client)
             await self.test_insert_fake_source(client)
             await self.test_list_sources_has_one(client)
+            await self.test_pdf_upload(client)
             await self.test_trigger_ingest(client)
             await self.test_ask_question(client)
             await self.test_ask_question_cached(client)
@@ -251,6 +252,50 @@ asyncio.run(run())
             r.status_code in (200, 500),
             f"got {r.status_code}",
         )
+
+    async def test_pdf_upload(self, client):
+        print("\n9. PDF upload")
+        import os
+        import fitz
+        
+        # Create a test PDF
+        pdf_path = "tests/data/e2e_test.pdf"
+        os.makedirs("tests/data", exist_ok=True)
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((50, 50), "Pingo is an AI assistant. It loves to process PDF files.")
+        doc.save(pdf_path)
+        doc.close()
+        
+        try:
+            with open(pdf_path, "rb") as f:
+                r = await client.post(
+                    f"{BASE_URL}/ingest/pdf",
+                    headers=self._headers(),
+                    files={"file": ("e2e_test.pdf", f, "application/pdf")}
+                )
+            
+            self._check(
+                "POST /ingest/pdf returns 200",
+                r.status_code == 200,
+                f"got {r.status_code}: {r.text[:100]}"
+            )
+            if r.status_code == 200:
+                data = r.json()
+                self._check("document_id in response", "document_id" in data)
+                self._check("job_id in response", "job_id" in data)
+                
+                # Check job status immediately
+                job_id = data["job_id"]
+                r_job = await client.get(
+                    f"{BASE_URL}/ingest/job/{job_id}",
+                    headers=self._headers()
+                )
+                self._check("GET /ingest/job returns 200", r_job.status_code == 200)
+                
+        finally:
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
 
     async def test_ask_question(self, client):
         print("\n10. Ask Pingo a question")

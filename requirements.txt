@@ -31,7 +31,7 @@ httpx
 beautifulsoup4
 lxml
 python-docx
-PyMuPDF
+PyMuPDF==1.23.8
 tiktoken
 google-generativeai
 groq

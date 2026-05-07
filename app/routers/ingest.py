@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -7,6 +7,8 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.ingest import IngestResponse, IngestResultResponse
 from app.schemas.job import JobStatusResponse, JobListResponse
+from app.schemas.document import PDFUploadAcceptedResponse
+from app.models.uploaded_document import UploadedDocument
 from app.services.source_service import get_source_by_id, get_all_sources
 from app.services.ingestion_service import ingest_source
 from app.utils.job_tracker import create_job, get_job, get_user_jobs
@@ -53,6 +55,80 @@ async def trigger_ingest(
         source_type=source.source_type,
         message=f"Job queued! Poll /ingest/job/{job_id} for progress.",
     )
+
+
+@router.post("/pdf", response_model=PDFUploadAcceptedResponse)
+async def upload_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload a PDF file for semantic indexing.
+    Validates size, type, and queues a background task for text extraction.
+    """
+    import os
+    from app.workers.tasks import process_pdf_task
+
+    # 1. Validation
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    # Max size 20MB
+    MAX_SIZE = 20 * 1024 * 1024
+    content = await file.read()
+    if len(content) > MAX_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (Max 20MB).")
+    
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="File is empty.")
+
+    # 2. Save to shared storage
+    storage_path = os.path.join("storage", "uploads")
+    os.makedirs(storage_path, exist_ok=True)
+    
+    # Sanitize filename
+    safe_filename = "".join([c if c.isalnum() or c in "._-" else "_" for c in file.filename])
+    file_id = str(uuid.uuid4())
+    temp_filename = f"{file_id}_{safe_filename}"
+    full_path = os.path.abspath(os.path.join(storage_path, temp_filename))
+    
+    with open(full_path, "wb") as f:
+        f.write(content)
+
+    # 3. Create Document record in Postgres
+    doc = UploadedDocument(
+        id=uuid.UUID(file_id),
+        user_id=current_user.id,
+        filename=file.filename,
+        sync_status="queued",
+        file_metadata={"size_bytes": len(content)}
+    )
+    db.add(doc)
+    await db.commit()
+
+    # 4. Queue Celery task
+    job_id = str(uuid.uuid4())
+    await create_job(
+        job_id=job_id,
+        user_id=str(current_user.id),
+        source_id=file_id,
+        source_type="pdf_upload",
+    )
+
+    process_pdf_task.delay(
+        user_id=str(current_user.id),
+        doc_id=file_id,
+        file_path=full_path,
+        job_id=job_id
+    )
+
+    return PDFUploadAcceptedResponse(
+        message="PDF upload accepted and queued for processing.",
+        document_id=uuid.UUID(file_id),
+        job_id=job_id
+    )
+
 
 @router.post("/trigger-all", response_model=list[IngestResponse])
 async def trigger_all_ingest(

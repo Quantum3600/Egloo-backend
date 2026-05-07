@@ -136,16 +136,23 @@ def build_context(chunks: List[Dict[str, Any]]) -> str:
 
         # Format header for this chunk
         header_parts = [f"[{i}] Source: {source_type}"]
-        if sender:
-            header_parts.append(f"From: {sender}")
-        if subject:
-            header_parts.append(f"Subject: {subject}")
-        if timestamp:
-            try:
-                dt = datetime.fromisoformat(timestamp)
-                header_parts.append(f"Date: {dt.strftime('%b %d, %Y')}")
-            except Exception:
-                pass
+        
+        if source_type == "PDF_UPLOAD":
+            filename = chunk.get("metadata", {}).get("filename", "Unknown PDF")
+            page = chunk.get("metadata", {}).get("page_number", "?")
+            header_parts.append(f"File: {filename}")
+            header_parts.append(f"Page: {page}")
+        else:
+            if sender:
+                header_parts.append(f"From: {sender}")
+            if subject:
+                header_parts.append(f"Subject: {subject}")
+            if timestamp:
+                try:
+                    dt = datetime.fromisoformat(timestamp)
+                    header_parts.append(f"Date: {dt.strftime('%b %d, %Y')}")
+                except Exception:
+                    pass
 
         lines.append(" | ".join(header_parts))
         lines.append(chunk["content"])
@@ -174,8 +181,9 @@ def format_sources(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "document_id": doc_id,
             "source_type": chunk["source_type"],
             "sender": chunk.get("sender", ""),
-            "subject": chunk.get("subject", ""),
+            "subject": chunk.get("subject", "") or chunk.get("metadata", {}).get("filename", ""),
             "timestamp": chunk.get("timestamp", ""),
+            "page_number": chunk.get("metadata", {}).get("page_number"),
             "content_preview": chunk["content"][:200] + "..."
                 if len(chunk["content"]) > 200
                 else chunk["content"],
