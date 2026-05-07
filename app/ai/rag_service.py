@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from datetime import datetime, timezone
 
@@ -34,9 +35,10 @@ When answering:
 
 # ─── Step 1: Retrieve relevant chunks from ChromaDB ──────────────────────────
 
-def retrieve_chunks(
+async def retrieve_chunks(
     user_id: str,
     question: str,
+    active_sources: List[str] = None,
     top_k: int = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -60,9 +62,23 @@ def retrieve_chunks(
 
     # Search for similar chunks
     try:
-        results = collection.query(
+        # Filter by active sources if provided
+        where_filter = None
+        if active_sources:
+            if len(active_sources) == 1:
+                where_filter = {"source_type": active_sources[0]}
+            else:
+                where_filter = {"source_type": {"$in": active_sources}}
+        elif active_sources == []:
+            # If explicit empty list, return nothing
+            return []
+
+        # Run ChromaDB query in a thread pool since the HttpClient is synchronous
+        results = await asyncio.to_thread(
+            collection.query,
             query_embeddings=[question_vector],
             n_results=top_k,
+            where=where_filter,
             include=["documents", "metadatas", "distances"],
         )
     except Exception as e:
@@ -198,6 +214,7 @@ async def cache_answer(user_id: str, question: str, answer_data: Dict):
 async def answer_question(
     user_id: str,
     question: str,
+    active_sources: List[str] = None,
     use_cache: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -220,8 +237,38 @@ async def answer_question(
             cached["cached"] = True
             return cached
 
-    # Retrieve relevant chunks
-    chunks = retrieve_chunks(user_id, question)
+    # --- Parallel Omni-Search Logic ---
+    chunks = []
+    if active_sources and len(active_sources) > 1:
+        # Search each source in parallel to ensure diversity
+        tasks = [
+            retrieve_chunks(user_id, question, active_sources=[src])
+            for src in active_sources
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Combine results, ignoring exceptions
+        for res in results:
+            if isinstance(res, list):
+                chunks.extend(res)
+            else:
+                print(f"[WARNING] Parallel search task failed: {res}")
+        
+        # Deduplicate by document_id and sort by similarity
+        seen_docs = set()
+        unique_chunks = []
+        for c in chunks:
+            doc_id = c.get("document_id")
+            if doc_id not in seen_docs:
+                unique_chunks.append(c)
+                seen_docs.add(doc_id)
+        
+        unique_chunks.sort(key=lambda x: x["similarity"], reverse=True)
+        chunks = unique_chunks[:settings.RAG_TOP_K]
+    else:
+        # Single source or all sources in one query
+        chunks = await retrieve_chunks(user_id, question, active_sources=active_sources)
+
     context = build_context(chunks)
 
     # Build prompt
@@ -266,6 +313,7 @@ If the information is insufficient, say so clearly."""
 async def answer_question_stream(
     user_id: str,
     question: str,
+    active_sources: List[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming RAG pipeline — yields SSE-formatted strings.
@@ -278,8 +326,31 @@ async def answer_question_stream(
       data: {"type": "done", "model": "gemini", "chunks": 5}
       data: [DONE]
     """
-    # Retrieve chunks first (non-streaming)
-    chunks = retrieve_chunks(user_id, question)
+    # --- Parallel Omni-Search Logic (Streaming) ---
+    chunks = []
+    if active_sources and len(active_sources) > 1:
+        tasks = [
+            retrieve_chunks(user_id, question, active_sources=[src])
+            for src in active_sources
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, list):
+                chunks.extend(res)
+        
+        seen_docs = set()
+        unique_chunks = []
+        for c in chunks:
+            doc_id = c.get("document_id")
+            if doc_id not in seen_docs:
+                unique_chunks.append(c)
+                seen_docs.add(doc_id)
+        
+        unique_chunks.sort(key=lambda x: x["similarity"], reverse=True)
+        chunks = unique_chunks[:settings.RAG_TOP_K]
+    else:
+        chunks = await retrieve_chunks(user_id, question, active_sources=active_sources)
+
     context = build_context(chunks)
     sources = format_sources(chunks)
 

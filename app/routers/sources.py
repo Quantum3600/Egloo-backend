@@ -17,6 +17,7 @@ GET  /sources/{source_type}/status    – get sync status for a specific source
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+import urllib.parse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -103,10 +104,7 @@ async def gmail_callback(
     instead redirect to a deep-link / frontend URL.
     """
     if error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Google OAuth denied: {error}",
-        )
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error)}")
 
     # We need the user_id from the state to verify ownership.
     # Peek without consuming so we can get the user_id first.
@@ -118,25 +116,19 @@ async def gmail_callback(
     stored_user_id = await _redis.get(f"oauth_state:{state}")
 
     if stored_user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OAuth state. Please try connecting again.",
-        )
+        error_msg = "Invalid or expired OAuth state. Please try connecting again."
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error_msg)}")
 
     valid = await verify_and_consume_state(state, stored_user_id)
     if not valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OAuth state mismatch. Possible CSRF attempt.",
-        )
+        error_msg = "OAuth state mismatch. Possible CSRF attempt."
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error_msg)}")
 
     try:
         token_data = await google_oauth.exchange_google_code(code)
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to exchange Google auth code: {exc}",
-        )
+        error_msg = f"Failed to exchange Google auth code: {exc}"
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error_msg)}")
 
     from uuid import UUID
 
@@ -150,7 +142,7 @@ async def gmail_callback(
         source_metadata={"scope": token_data.get("scope", "")},
     )
 
-    return {"message": "Gmail connected successfully.", "source_type": "gmail"}
+    return RedirectResponse(url="egloo://auth/callback?status=success&source=gmail", status_code=302)
 
 
 @router.get(
@@ -165,10 +157,7 @@ async def slack_callback(
 ):
     """Handle Slack's redirect after the user grants (or denies) consent."""
     if error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Slack OAuth denied: {error}",
-        )
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error)}")
 
     import redis.asyncio as aioredis
     from app.config import settings as _settings
@@ -177,25 +166,19 @@ async def slack_callback(
     stored_user_id = await _redis.get(f"oauth_state:{state}")
 
     if stored_user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OAuth state. Please try connecting again.",
-        )
+        error_msg = "Invalid or expired OAuth state. Please try connecting again."
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error_msg)}")
 
     valid = await verify_and_consume_state(state, stored_user_id)
     if not valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OAuth state mismatch. Possible CSRF attempt.",
-        )
+        error_msg = "OAuth state mismatch. Possible CSRF attempt."
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error_msg)}")
 
     try:
         token_data = await slack_oauth.exchange_slack_code(code)
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to exchange Slack auth code: {exc}",
-        )
+        error_msg = f"Failed to exchange Slack auth code: {exc}"
+        return RedirectResponse(url=f"egloo://auth/callback?status=error&message={urllib.parse.quote(error_msg)}")
 
     from uuid import UUID
 
@@ -216,7 +199,7 @@ async def slack_callback(
         },
     )
 
-    return {"message": "Slack connected successfully.", "source_type": "slack"}
+    return RedirectResponse(url="egloo://auth/callback?status=success&source=slack", status_code=302)
 
 
 # ---------------------------------------------------------------------------

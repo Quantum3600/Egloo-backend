@@ -10,6 +10,7 @@ from app.schemas.query import (
     QueryHistoryResponse, QueryHistoryItem,
 )
 from app.ai.rag_service import answer_question, answer_question_stream
+from app.services import source_service
 from app.services.query_history_service import (
     save_query, get_query_history, delete_query_history,
 )
@@ -37,10 +38,15 @@ async def ask(
             detail="Question too long. Keep it under 1000 characters."
         )
 
+    # Fetch active sources automatically
+    user_sources = await source_service.get_all_sources(db, current_user.id)
+    active_source_types = [s.source_type for s in user_sources]
+
     try:
         result = await answer_question(
             user_id=str(current_user.id),
             question=body.question,
+            active_sources=active_source_types,
             use_cache=body.use_cache,
         )
     except RuntimeError as e:
@@ -74,6 +80,7 @@ async def ask(
 async def ask_stream(
     body: AskRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Ask Pingo a question — answer streams token by token via SSE.
@@ -90,10 +97,15 @@ async def ask_stream(
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
+    # Fetch active sources automatically
+    user_sources = await source_service.get_all_sources(db, current_user.id)
+    active_source_types = [s.source_type for s in user_sources]
+
     return StreamingResponse(
         answer_question_stream(
             user_id=str(current_user.id),
             question=body.question,
+            active_sources=active_source_types,
         ),
         media_type="text/event-stream",
         headers={
@@ -172,10 +184,15 @@ async def save_query_result(
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
+    # Fetch active sources automatically
+    user_sources = await source_service.get_all_sources(db, current_user.id)
+    active_source_types = [s.source_type for s in user_sources]
+
     try:
         result = await answer_question(
             user_id=str(current_user.id),
             question=body.question,
+            active_sources=active_source_types,
             use_cache=body.use_cache,
         )
     except RuntimeError as e:
