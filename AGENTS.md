@@ -67,7 +67,8 @@ All API endpoints are prefixed with `/api/v1`.
 ### 🔌 Sources (`/sources`)
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
-| `/sources` | `GET` | List all connected accounts. |
+| `/sources` | `GET` | List user's connected sources (includes connection status). |
+| `/sources/available` | `GET` | List all supported platforms (Global). |
 | `/sources/connect/gmail` | `GET` | Start Google OAuth flow. |
 | `/sources/connect/slack` | `GET` | Start Slack OAuth flow. |
 | `/sources/{type}` | `DELETE` | Disconnect a specific source. |

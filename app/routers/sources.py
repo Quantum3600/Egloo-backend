@@ -23,11 +23,68 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.source import MessageResponse, SourceListResponse, SourceResponse, SyncStatusResponse
+from app.schemas.source import (
+    AvailableSource,
+    ConnectedSource,
+    MessageResponse,
+    SourceListResponse,
+    SourceResponse,
+    SyncStatusResponse,
+)
+from typing import List
 from app.services import google_oauth, slack_oauth, source_service
 from app.utils.oauth_state import generate_state, verify_and_consume_state
 
 router = APIRouter(tags=["sources"])
+
+
+AVAILABLE_SOURCES = [
+    {
+        "id": "gmail",
+        "name": "Gmail",
+        "displayName": "Gmail",
+        "icon": "https://raw.githubusercontent.com/Pingo-Intelligence/Egloo/main/assets/icons/gmail.png",
+        "description": "Read your emails and attachments",
+        "requiresAuth": True,
+        "scopes": ["gmail.readonly"]
+    },
+    {
+        "id": "slack",
+        "name": "Slack",
+        "displayName": "Slack",
+        "icon": "https://raw.githubusercontent.com/Pingo-Intelligence/Egloo/main/assets/icons/slack.png",
+        "description": "Sync messages and files from Slack",
+        "requiresAuth": True,
+        "scopes": ["channels:history", "groups:history"]
+    },
+    {
+        "id": "google_drive",
+        "name": "Google Drive",
+        "displayName": "Google Drive",
+        "icon": "https://raw.githubusercontent.com/Pingo-Intelligence/Egloo/main/assets/icons/drive.png",
+        "description": "Index documents and PDFs",
+        "requiresAuth": True,
+        "scopes": ["drive.readonly"]
+    },
+    {
+        "id": "notion",
+        "name": "Notion",
+        "displayName": "Notion",
+        "icon": "https://raw.githubusercontent.com/Pingo-Intelligence/Egloo/main/assets/icons/notion.png",
+        "description": "Connect to your Notion workspace",
+        "requiresAuth": True,
+        "scopes": ["pages:read"]
+    },
+    {
+        "id": "pdf_upload",
+        "name": "PDF Upload",
+        "displayName": "Upload PDFs",
+        "icon": "https://raw.githubusercontent.com/Pingo-Intelligence/Egloo/main/assets/icons/pdf.png",
+        "description": "Upload PDF documents manually",
+        "requiresAuth": False,
+        "scopes": []
+    }
+]
 
 
 # ---------------------------------------------------------------------------
@@ -35,20 +92,63 @@ router = APIRouter(tags=["sources"])
 # ---------------------------------------------------------------------------
 
 @router.get(
+    "/sources/available",
+    response_model=List[AvailableSource],
+    summary="List all supported data sources (Global)",
+)
+async def get_available_sources():
+    """Return the list of all data sources supported by Egloo."""
+    return AVAILABLE_SOURCES
+
+
+@router.get(
     "/sources",
-    response_model=SourceListResponse,
-    summary="List all connected data sources",
+    response_model=List[ConnectedSource],
+    summary="List user source connections (Both connected and available)",
 )
 async def list_sources(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return every data source connected to the authenticated user's account."""
-    sources = await source_service.get_all_sources(db, current_user.id)
-    return SourceListResponse(
-        sources=[SourceResponse.model_validate(s) for s in sources],
-        total=len(sources),
-    )
+    """Return the user's connection status for every available source."""
+    connected = await source_service.get_all_sources(db, current_user.id)
+    connected_map = {s.source_type: s for s in connected}
+
+    result = []
+    for available in AVAILABLE_SOURCES:
+        source_id = available["id"]
+        # Match "google_drive" to "google_drive" or "gmail" to "gmail"
+        # Database might store "gmail", "slack", etc.
+        source_data = connected_map.get(source_id)
+
+        if source_data:
+            result.append(ConnectedSource(
+                id=str(source_data.id),
+                type=source_data.source_type.upper(),
+                sourceId=source_id,
+                accountName=source_data.source_metadata.get("account_name") or f"{source_data.source_type} account",
+                isConnected=True,
+                oauthProviderAccount=source_data.source_metadata.get("email") or source_data.source_metadata.get("slack_user_id"),
+                itemCount=source_data.source_metadata.get("item_count", 0),
+                lastSyncedAt=source_data.last_synced_at,
+                nextSyncAt=None, # To be implemented in future sync scheduling
+                syncStatus=source_data.sync_status,
+            ))
+        else:
+            result.append(ConnectedSource(
+                id=f"{source_id}_{current_user.id}",
+                type=source_id.upper(),
+                sourceId=source_id,
+                accountName=None,
+                isConnected=False,
+                oauthProviderAccount=None,
+                itemCount=0,
+                lastSyncedAt=None,
+                nextSyncAt=None,
+                syncStatus="disconnected",
+            ))
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +232,15 @@ async def gmail_callback(
 
     from uuid import UUID
 
+    # Fetch user info for metadata
+    try:
+        user_info = await google_oauth.fetch_user_info(token_data["access_token"])
+        email = user_info.get("email", "")
+        name = user_info.get("name", "")
+    except Exception:
+        email = "Unknown"
+        name = "Google Account"
+
     await source_service.upsert_source(
         db=db,
         user_id=UUID(stored_user_id),
@@ -139,7 +248,11 @@ async def gmail_callback(
         access_token=token_data["access_token"],
         refresh_token=token_data.get("refresh_token"),
         token_expiry=token_data.get("expires_at"),
-        source_metadata={"scope": token_data.get("scope", "")},
+        source_metadata={
+            "scope": token_data.get("scope", ""),
+            "email": email,
+            "account_name": email or name,
+        },
     )
 
     return RedirectResponse(url="egloo://auth/callback?status=success&source=gmail", status_code=302)
@@ -196,6 +309,7 @@ async def slack_callback(
             "team_id": team.get("id", ""),
             "team_name": team.get("name", ""),
             "slack_user_id": authed_user.get("id", ""),
+            "account_name": team.get("name", "Slack Workspace"),
         },
     )
 

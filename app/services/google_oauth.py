@@ -113,3 +113,16 @@ async def refresh_google_access_token(refresh_token: str) -> dict:
     data["expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
     return data
+
+
+async def fetch_user_info(access_token: str) -> dict:
+    """Fetch user profile info (email, name) using the access token.
+
+    Used to populate source metadata (account_name, email).
+    """
+    url = "https://www.googleapis.com/oauth2/v3/userinfo"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+    return resp.json()

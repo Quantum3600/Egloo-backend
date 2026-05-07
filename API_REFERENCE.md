@@ -66,7 +66,8 @@ Manage third-party integrations (Gmail, Slack, Drive).
 
 | Method | Route | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/sources` | List all connected sources for the user. | Yes |
+| `GET` | `/api/v1/sources` | List user's connected sources (Status of all available). | Yes |
+| `GET` | `/api/v1/sources/available` | List all supported platforms (Global list). | No |
 | `GET` | `/api/v1/sources/connect/{type}` | Get OAuth URL for Gmail or Slack. | Yes |
 | `GET` | `/api/v1/sources/callback/{type}` | OAuth callback handler. | No |
 | `DELETE` | `/api/v1/sources/{type}` | Disconnect a source. | Yes |
