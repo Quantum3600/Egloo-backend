@@ -23,9 +23,11 @@ def mock_db():
 
 @pytest.fixture
 def mock_redis():
-    with patch("app.services.brain_service.redis_client", new_callable=AsyncMock) as m_redis:
-        m_redis.get.return_value = None
-        yield m_redis
+    with patch("app.services.brain_service.get_redis") as m_get_redis:
+        mock_client = AsyncMock()
+        mock_client.get.return_value = None
+        m_get_redis.return_value = mock_client
+        yield mock_client
 
 # ─── Tests for get_brain_today ────────────────────────────────────────────────
 
@@ -95,13 +97,15 @@ async def test_scan_and_store_alerts_urgency():
         {"content": "Urgent: deadline for the approval is tomorrow ASAP", "metadata": {"source_type": "gmail", "subject": "Q3 Report"}}
     ]
     
-    with patch("app.services.alert_service.redis_client", new_callable=AsyncMock) as mock_redis:
-        mock_redis.get.return_value = None
+    with patch("app.services.alert_service.get_redis") as m_get_redis:
+        mock_client = AsyncMock()
+        mock_client.get.return_value = None
+        m_get_redis.return_value = mock_client
         
         await scan_and_store_alerts(user_id, chunks)
         
-        assert mock_redis.set.called
-        stored_data = json.loads(mock_redis.set.call_args[0][1])
+        assert mock_client.set.called
+        stored_data = json.loads(mock_client.set.call_args[0][1])
         
         assert len(stored_data) == 1
         alert = stored_data[0]
